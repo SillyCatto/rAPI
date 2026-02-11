@@ -1,0 +1,81 @@
+{
+  "name": "rapi",
+  "displayName": "rAPI",
+  "description": "A simple and intuitive REST client VS Code extension for people who hate SaaS-ification of dev tools.",
+  "version": "0.1.0",
+  "publisher": "Raiyan",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "rapi.open",
+        "title": "rAPI: Open rAPI"
+      },
+      {
+        "command": "rapi.createCollection",
+        "title": "rAPI: Create Collection"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "rapi-sidebar",
+          "title": "rAPI",
+          "icon": "$(zap)"
+        }
+      ]
+    },
+    "views": {
+      "rapi-sidebar": [
+        {
+          "id": "rapi.collectionsView",
+          "name": "Collections"
+        },
+        {
+          "id": "rapi.environmentsView",
+          "name": "Environments"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "rapi.sendRequest",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "activeWebviewPanelId == 'rapi.requestPanel'"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "lint": "eslint src --ext ts,tsx",
+    "test": "mocha --require ts-node/register src/test/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@types/vscode": "^1.85.0",
+    "concurrently": "^8.2.2",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.56.0",
+    "mocha": "^10.2.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}
