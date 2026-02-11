@@ -7,7 +7,7 @@ Just send HTTP requests and save them as plain JSON files inside your workspace.
 
 <br>
 
-> ⚠️ **Early Stage Project**
+> ⚠️ **Early Stage Project**\
 rAPI is still in active development. Some features are incomplete and others are planned but not yet implemented. I work on this alongside academics and life, so progress may be slow — but contributions, suggestions, and pull requests are always welcome! 😀
 
 ---
@@ -25,7 +25,7 @@ So I decided to build a tool to fill in the gap for my personal pain points, som
 ✅ Local-first\
 ✅ Minimal and distraction-free\
 ✅ Simple to use\
-✅ Free and open\
+✅ Free and open
 
 No accounts. No platforms. Just requests and responses.
 
