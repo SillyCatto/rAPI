@@ -6,6 +6,14 @@ import React, { useCallback, useEffect, useState } from "react";
 import type { Collection, Environment, RequestSpec } from "../types";
 import { postToExtension } from "./messaging";
 
+export interface RequestEditorHandle {
+  collectionName: string;
+  setCollectionName: (name: string) => void;
+  handleSave: () => void;
+  url: string;
+  collections: Collection[];
+}
+
 interface Props {
   activeRequest: RequestSpec | null;
   activeCollectionName: string;
@@ -13,6 +21,7 @@ interface Props {
   environments: Environment[];
   sending: boolean;
   onSend: () => void;
+  onEditorReady: (handle: RequestEditorHandle) => void;
 }
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
@@ -83,6 +92,7 @@ export const RequestEditor: React.FC<Props> = ({
   environments,
   sending,
   onSend,
+  onEditorReady,
 }) => {
   const [method, setMethod] = useState<RequestSpec["method"]>("GET");
   const [url, setUrl] = useState("");
@@ -176,24 +186,25 @@ export const RequestEditor: React.FC<Props> = ({
     onSend();
   };
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     const targetCollection = collectionName || "default";
     const spec = buildSpec();
     postToExtension({
       type: "saveRequest",
       payload: { collectionName: targetCollection, request: spec },
     });
-  };
+  }, [collectionName, buildSpec]);
 
-  const handleNew = () => {
-    setRequestId(newId());
-    setName("");
-    setMethod("GET");
-    setUrl("");
-    setParams([{ key: "", value: "", enabled: true }]);
-    setHeaders([{ key: "", value: "", enabled: true }]);
-    setBody("");
-  };
+  // Expose save handle to parent for the pane-title save button
+  useEffect(() => {
+    onEditorReady({
+      collectionName,
+      setCollectionName,
+      handleSave,
+      url,
+      collections,
+    });
+  }, [collectionName, handleSave, url, collections, onEditorReady]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -220,7 +231,7 @@ export const RequestEditor: React.FC<Props> = ({
         />
       </div>
 
-      {/* ── Top bar: method + URL + Send ── */}
+      {/* ── Top bar: method + URL + Save + Send ── */}
       <div className="re-topbar">
         <select
           value={method}
@@ -326,28 +337,6 @@ export const RequestEditor: React.FC<Props> = ({
             Body is not available for {method} requests.
           </div>
         )}
-      </div>
-
-      {/* ── Save row ── */}
-      <div className="re-actions">
-        <select
-          value={collectionName}
-          onChange={(e) => setCollectionName(e.target.value)}
-          className="re-collection-select"
-        >
-          <option value="">Select collection…</option>
-          {collections.map((c) => (
-            <option key={c.name} value={c.name}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <button className="re-save-btn" onClick={handleSave} disabled={!url}>
-          Save
-        </button>
-        <button className="re-new-btn" onClick={handleNew}>
-          New
-        </button>
       </div>
     </div>
   );

@@ -21,9 +21,59 @@
       },
       {
         "command": "rapi.createCollection",
-        "title": "rAPI: Create Collection"
+        "title": "New Collection",
+        "icon": "$(add)"
+      },
+      {
+        "command": "rapi.newHttpRequest",
+        "title": "New HTTP Request",
+        "icon": "$(add)"
+      },
+      {
+        "command": "rapi.deleteRequest",
+        "title": "Delete",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "rapi.collectionMenu",
+        "title": "More Actions...",
+        "icon": "$(ellipsis)"
+      },
+      {
+        "command": "rapi.requestMenu",
+        "title": "More Actions...",
+        "icon": "$(ellipsis)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "rapi.createCollection",
+          "when": "view == rapi.collectionsView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "rapi.collectionMenu",
+          "when": "view == rapi.collectionsView && viewItem == collection",
+          "group": "inline"
+        },
+        {
+          "command": "rapi.requestMenu",
+          "when": "view == rapi.collectionsView && viewItem == request",
+          "group": "inline"
+        },
+        {
+          "command": "rapi.newHttpRequest",
+          "when": "view == rapi.collectionsView && viewItem == collection"
+        },
+        {
+          "command": "rapi.deleteRequest",
+          "when": "view == rapi.collectionsView && viewItem == request"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {

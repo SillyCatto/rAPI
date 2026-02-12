@@ -14,6 +14,39 @@ import { Environment, RequestResult, RequestSpec } from "../types";
 const MAX_BODY_SIZE = 1_048_576;
 
 /**
+ * Sanitize a header value for Node.js http module.
+ * Node 18+ strictly validates headers — only allows characters in Latin-1 range.
+ * Remove/replace anything outside the valid range.
+ */
+function sanitizeHeaderValue(value: string): string {
+  // Convert to string, trim, and keep only valid HTTP header value chars
+  // Valid chars: tab (0x09) and printable ASCII (0x20-0x7E) plus Latin-1 (0x80-0xFF)
+  // Remove control characters and anything outside Latin-1
+  let result = "";
+  for (const char of String(value)) {
+    const code = char.charCodeAt(0);
+    // Allow tab, space through tilde, and extended Latin-1 (but not DEL 0x7F)
+    if (
+      code === 0x09 ||
+      (code >= 0x20 && code <= 0x7e) ||
+      (code >= 0x80 && code <= 0xff)
+    ) {
+      result += char;
+    }
+    // Skip invalid characters silently
+  }
+  return result.trim();
+}
+
+/**
+ * Sanitize header name — should be valid HTTP token.
+ */
+function sanitizeHeaderName(name: string): string {
+  // Trim whitespace and remove invalid characters
+  return name.trim().replace(/[^a-zA-Z0-9!#$%&'*+.^_`|~-]/g, "");
+}
+
+/**
  * Replace `{{key}}` placeholders in a string using environment values.
  * Returns the resolved string and a list of any missing variable names.
  */
@@ -81,7 +114,23 @@ export async function sendRequest(
   const isHttps = url.protocol === "https:";
   const lib = isHttps ? https : http;
 
-  const headers: Record<string, string> = { ...resolved.headers };
+  // Sanitize headers for Node.js http module compatibility
+  const headers: Record<string, string> = {};
+  if (resolved.headers) {
+    for (const [key, value] of Object.entries(resolved.headers)) {
+      // Skip empty, null, or undefined values
+      if (value === null || value === undefined || value === "") {
+        continue;
+      }
+      const sanitizedKey = sanitizeHeaderName(key);
+      // Ensure value is a string and sanitize it
+      const strValue = typeof value === "string" ? value : String(value);
+      const sanitizedValue = sanitizeHeaderValue(strValue);
+      if (sanitizedKey && sanitizedValue) {
+        headers[sanitizedKey] = sanitizedValue;
+      }
+    }
+  }
   if (resolved.body && !headers["Content-Type"] && !headers["content-type"]) {
     headers["Content-Type"] = "application/json";
   }

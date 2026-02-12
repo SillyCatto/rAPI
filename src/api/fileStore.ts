@@ -168,6 +168,37 @@ export async function createCollection(name: string): Promise<void> {
   await writeJsonFile(uri, collection);
 }
 
+/** Rename a collection (rename the file and update internal name). */
+export async function renameCollection(
+  oldName: string,
+  newName: string,
+): Promise<void> {
+  const oldFileName = oldName.endsWith(".json") ? oldName : `${oldName}.json`;
+  const newFileName = newName.endsWith(".json") ? newName : `${newName}.json`;
+  const oldUri = vscode.Uri.joinPath(collectionsDir(), oldFileName);
+  const newUri = vscode.Uri.joinPath(collectionsDir(), newFileName);
+
+  try {
+    const collection = await readJsonFile<Collection>(oldUri);
+    collection.name = newName.replace(/\.json$/, "");
+    await writeJsonFile(newUri, collection);
+    await vscode.workspace.fs.delete(oldUri);
+  } catch {
+    // old file doesn't exist
+  }
+}
+
+/** Delete an entire collection file. */
+export async function deleteCollection(name: string): Promise<void> {
+  const fileName = name.endsWith(".json") ? name : `${name}.json`;
+  const uri = vscode.Uri.joinPath(collectionsDir(), fileName);
+  try {
+    await vscode.workspace.fs.delete(uri);
+  } catch {
+    // file doesn't exist
+  }
+}
+
 /** Write sample files if `.rapi/` is empty. */
 export async function writeSampleFiles(): Promise<void> {
   await ensureRapiStructure();

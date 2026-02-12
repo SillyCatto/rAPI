@@ -14,8 +14,10 @@ import type {
   RequestSpec,
 } from "../types";
 import { onExtensionMessage, postToExtension } from "./messaging";
-import { RequestEditor } from "./RequestEditor";
+import { RequestEditor, RequestEditorHandle } from "./RequestEditor";
 import { ResponseViewer } from "./ResponseViewer";
+
+type Layout = "horizontal" | "vertical";
 
 const App: React.FC = () => {
   // ─── State ───────────────────────────────────────────────────────────────
@@ -28,25 +30,44 @@ const App: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [warning, setWarning] = useState<string | null>(null);
 
+  // ─── Layout toggle ───────────────────────────────────────────────────────
+  const [layout, setLayout] = useState<Layout>("horizontal");
+
+  // ─── Editor save handle (lifted from RequestEditor) ──────────────────────
+  const [editorHandle, setEditorHandle] = useState<RequestEditorHandle | null>(
+    null,
+  );
+  const onEditorReady = useCallback((h: RequestEditorHandle) => {
+    setEditorHandle(h);
+  }, []);
+
   // ─── Resizable split pane ────────────────────────────────────────────────
-  const [leftWidth, setLeftWidth] = useState(50); // percentage
+  const [splitSize, setSplitSize] = useState(50); // percentage
   const [isDragging, setIsDragging] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
 
-  const onDividerMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  }, []);
+  const onDividerMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsDragging(true);
+      document.body.style.cursor =
+        layout === "horizontal" ? "col-resize" : "row-resize";
+      document.body.style.userSelect = "none";
+    },
+    [layout],
+  );
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!isDragging || !splitRef.current) return;
       const rect = splitRef.current.getBoundingClientRect();
-      const pct = ((e.clientX - rect.left) / rect.width) * 100;
-      // Clamp between 20% and 80%
-      setLeftWidth(Math.min(80, Math.max(20, pct)));
+      let pct: number;
+      if (layout === "horizontal") {
+        pct = ((e.clientX - rect.left) / rect.width) * 100;
+      } else {
+        pct = ((e.clientY - rect.top) / rect.height) * 100;
+      }
+      setSplitSize(Math.min(80, Math.max(20, pct)));
     };
     const onMouseUp = () => {
       if (isDragging) {
@@ -61,7 +82,7 @@ const App: React.FC = () => {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [isDragging]);
+  }, [isDragging, layout]);
 
   // ─── Message listener ────────────────────────────────────────────────────
   useEffect(() => {
@@ -116,15 +137,51 @@ const App: React.FC = () => {
   }, []);
 
   // ─── Render ──────────────────────────────────────────────────────────────
+  const isHoriz = layout === "horizontal";
+  const splitStyle = isHoriz
+    ? { flexBasis: `${splitSize}%`, flexGrow: 0, flexShrink: 0 }
+    : { flexBasis: `${splitSize}%`, flexGrow: 0, flexShrink: 0 };
+
   return (
     <div className="app-root">
       {warning && <div className="app-warning">{warning}</div>}
-      <div className="app-split" ref={splitRef}>
-        <div
-          className="app-pane app-left"
-          style={{ flexBasis: `${leftWidth}%`, flexGrow: 0, flexShrink: 0 }}
-        >
-          <h2 className="pane-title">Request</h2>
+      <div
+        className={`app-split ${isHoriz ? "app-split-h" : "app-split-v"}`}
+        ref={splitRef}
+      >
+        <div className="app-pane app-left" style={splitStyle}>
+          <div className="pane-header">
+            <h2 className="pane-title">Request</h2>
+            <div className="pane-header-actions">
+              {editorHandle && (
+                <>
+                  <select
+                    value={editorHandle.collectionName}
+                    onChange={(e) =>
+                      editorHandle.setCollectionName(e.target.value)
+                    }
+                    className="re-collection-select pane-header-select"
+                    title="Save to collection"
+                  >
+                    <option value="">Collection\u2026</option>
+                    {editorHandle.collections.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="re-save-btn pane-header-btn"
+                    onClick={editorHandle.handleSave}
+                    disabled={!editorHandle.url}
+                    title="Save request"
+                  >
+                    Save
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
           <RequestEditor
             activeRequest={activeRequest}
             activeCollectionName={activeCollectionName}
@@ -132,14 +189,47 @@ const App: React.FC = () => {
             environments={environments}
             sending={sending}
             onSend={handleSend}
+            onEditorReady={onEditorReady}
           />
         </div>
         <div
-          className={`app-divider${isDragging ? " dragging" : ""}`}
+          className={`app-divider${isDragging ? " dragging" : ""} ${isHoriz ? "app-divider-h" : "app-divider-v"}`}
           onMouseDown={onDividerMouseDown}
         />
         <div className="app-pane app-right" style={{ flex: 1 }}>
-          <h2 className="pane-title">Response</h2>
+          <div className="pane-header">
+            <h2 className="pane-title">Response</h2>
+            <div className="pane-header-actions">
+              <button
+                className={`layout-toggle-btn${isHoriz ? " active" : ""}`}
+                onClick={() => setLayout("horizontal")}
+                title="Dock response to the right"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                >
+                  <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 14V2h6v12H2zm12 0H9V2h5v12z" />
+                </svg>
+              </button>
+              <button
+                className={`layout-toggle-btn${!isHoriz ? " active" : ""}`}
+                onClick={() => setLayout("vertical")}
+                title="Dock response below"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                >
+                  <path d="M14 1H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM2 14V9h12v5H2zm12-6H2V2h12v6z" />
+                </svg>
+              </button>
+            </div>
+          </div>
           <ResponseViewer result={result} error={error} loading={sending} />
         </div>
       </div>
