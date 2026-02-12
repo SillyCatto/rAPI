@@ -1,5 +1,5 @@
 /**
- * RequestEditor.tsx — Left pane: method selector, URL, headers, body, send/save buttons.
+ * RequestEditor.tsx — Left pane: method selector, URL, tabbed Params/Headers/Body, send/save.
  */
 
 import React, { useCallback, useEffect, useState } from "react";
@@ -7,9 +7,7 @@ import type { Collection, Environment, RequestSpec } from "../types";
 import { postToExtension } from "./messaging";
 
 interface Props {
-  /** Pre-populated request (e.g. when opening from sidebar). */
   activeRequest: RequestSpec | null;
-  /** Name of the collection the active request belongs to. */
   activeCollectionName: string;
   collections: Collection[];
   environments: Environment[];
@@ -19,7 +17,6 @@ interface Props {
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
 
-/** Postman-style verb colors */
 const METHOD_COLORS: Record<string, string> = {
   GET: "#49cc90",
   POST: "#fca130",
@@ -29,16 +26,54 @@ const METHOD_COLORS: Record<string, string> = {
   OPTIONS: "#d63aff",
 };
 
-interface HeaderRow {
+interface KvRow {
   key: string;
   value: string;
   enabled: boolean;
 }
 
+type ReqTab = "params" | "headers" | "body";
+
 function newId(): string {
   return (
     "req-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
   );
+}
+
+/** Parse query string from a URL into KvRow[] */
+function parseQueryParams(rawUrl: string): KvRow[] {
+  try {
+    const qIdx = rawUrl.indexOf("?");
+    if (qIdx === -1) return [{ key: "", value: "", enabled: true }];
+    const qs = rawUrl.slice(qIdx + 1);
+    const pairs = qs.split("&").filter(Boolean);
+    const rows: KvRow[] = pairs.map((p) => {
+      const [k, ...rest] = p.split("=");
+      return {
+        key: decodeURIComponent(k),
+        value: decodeURIComponent(rest.join("=")),
+        enabled: true,
+      };
+    });
+    rows.push({ key: "", value: "", enabled: true });
+    return rows;
+  } catch {
+    return [{ key: "", value: "", enabled: true }];
+  }
+}
+
+/** Build a query string from KvRow[] and merge back onto the base URL */
+function buildUrlWithParams(baseUrl: string, params: KvRow[]): string {
+  const active = params.filter((r) => r.enabled && r.key.trim());
+  const base = baseUrl.split("?")[0];
+  if (active.length === 0) return base;
+  const qs = active
+    .map(
+      (r) =>
+        `${encodeURIComponent(r.key.trim())}=${encodeURIComponent(r.value)}`,
+    )
+    .join("&");
+  return `${base}?${qs}`;
 }
 
 export const RequestEditor: React.FC<Props> = ({
@@ -51,7 +86,10 @@ export const RequestEditor: React.FC<Props> = ({
 }) => {
   const [method, setMethod] = useState<RequestSpec["method"]>("GET");
   const [url, setUrl] = useState("");
-  const [headers, setHeaders] = useState<HeaderRow[]>([
+  const [params, setParams] = useState<KvRow[]>([
+    { key: "", value: "", enabled: true },
+  ]);
+  const [headers, setHeaders] = useState<KvRow[]>([
     { key: "", value: "", enabled: true },
   ]);
   const [body, setBody] = useState("");
@@ -59,6 +97,7 @@ export const RequestEditor: React.FC<Props> = ({
   const [collectionName, setCollectionName] = useState("");
   const [envName, setEnvName] = useState("");
   const [requestId, setRequestId] = useState(newId());
+  const [activeTab, setActiveTab] = useState<ReqTab>("params");
 
   // Sync from parent when a request is opened from the sidebar
   useEffect(() => {
@@ -68,6 +107,7 @@ export const RequestEditor: React.FC<Props> = ({
       setName(activeRequest.name);
       setBody(activeRequest.body ?? "");
       setRequestId(activeRequest.id);
+      setParams(parseQueryParams(activeRequest.url));
       if (
         activeRequest.headers &&
         Object.keys(activeRequest.headers).length > 0
@@ -88,6 +128,21 @@ export const RequestEditor: React.FC<Props> = ({
       setCollectionName(activeCollectionName);
     }
   }, [activeRequest, activeCollectionName]);
+
+  // When the user edits the URL bar directly, sync query params
+  const handleUrlChange = useCallback((raw: string) => {
+    setUrl(raw);
+    setParams(parseQueryParams(raw));
+  }, []);
+
+  // When params table changes, rebuild the URL
+  const handleParamsChange = useCallback(
+    (nextParams: KvRow[]) => {
+      setParams(nextParams);
+      setUrl(buildUrlWithParams(url, nextParams));
+    },
+    [url],
+  );
 
   const parseHeaders = useCallback((): Record<string, string> => {
     const result: Record<string, string> = {};
@@ -135,6 +190,7 @@ export const RequestEditor: React.FC<Props> = ({
     setName("");
     setMethod("GET");
     setUrl("");
+    setParams([{ key: "", value: "", enabled: true }]);
     setHeaders([{ key: "", value: "", enabled: true }]);
     setBody("");
   };
@@ -146,9 +202,14 @@ export const RequestEditor: React.FC<Props> = ({
     }
   };
 
+  // Badge counts for tab labels
+  const paramCount = params.filter((r) => r.enabled && r.key.trim()).length;
+  const headerCount = headers.filter((r) => r.enabled && r.key.trim()).length;
+  const hasBody = method === "POST" || method === "PUT" || method === "PATCH";
+
   return (
     <div className="request-editor" onKeyDown={handleKeyDown}>
-      {/* ── Request name (above verb bar) ── */}
+      {/* ── Request name ── */}
       <div className="re-row">
         <input
           className="re-name"
@@ -178,7 +239,7 @@ export const RequestEditor: React.FC<Props> = ({
           type="text"
           placeholder="https://example.com/api"
           value={url}
-          onChange={(e) => setUrl(e.target.value)}
+          onChange={(e) => handleUrlChange(e.target.value)}
         />
         <button
           className="re-send-btn"
@@ -206,100 +267,66 @@ export const RequestEditor: React.FC<Props> = ({
         </select>
       </div>
 
-      {/* ── Headers (key-value table) ── */}
-      <div className="re-section">
-        <label className="re-label">Headers</label>
-        <table className="re-headers-table">
-          <thead>
-            <tr>
-              <th className="re-hdr-check"></th>
-              <th className="re-hdr-key">Key</th>
-              <th className="re-hdr-val">Value</th>
-              <th className="re-hdr-del"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {headers.map((row, i) => (
-              <tr key={i} className={row.enabled ? "" : "re-hdr-disabled"}>
-                <td className="re-hdr-check">
-                  <input
-                    type="checkbox"
-                    checked={row.enabled}
-                    onChange={(e) => {
-                      const next = [...headers];
-                      next[i] = { ...row, enabled: e.target.checked };
-                      setHeaders(next);
-                    }}
-                  />
-                </td>
-                <td className="re-hdr-key">
-                  <input
-                    type="text"
-                    placeholder="Header name"
-                    value={row.key}
-                    onChange={(e) => {
-                      const next = [...headers];
-                      next[i] = { ...row, key: e.target.value };
-                      // Auto-add a new empty row when typing into the last row
-                      if (i === headers.length - 1 && e.target.value) {
-                        next.push({ key: "", value: "", enabled: true });
-                      }
-                      setHeaders(next);
-                    }}
-                  />
-                </td>
-                <td className="re-hdr-val">
-                  <input
-                    type="text"
-                    placeholder="Value"
-                    value={row.value}
-                    onChange={(e) => {
-                      const next = [...headers];
-                      next[i] = { ...row, value: e.target.value };
-                      if (i === headers.length - 1 && e.target.value) {
-                        next.push({ key: "", value: "", enabled: true });
-                      }
-                      setHeaders(next);
-                    }}
-                  />
-                </td>
-                <td className="re-hdr-del">
-                  {headers.length > 1 && (
-                    <button
-                      className="re-hdr-remove"
-                      onClick={() => {
-                        const next = headers.filter((_, j) => j !== i);
-                        if (next.length === 0)
-                          next.push({ key: "", value: "", enabled: true });
-                        setHeaders(next);
-                      }}
-                      title="Remove header"
-                    >
-                      ×
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* ── Tabs: Params | Headers | Body ── */}
+      <div className="tab-bar">
+        <button
+          className={`tab-btn${activeTab === "params" ? " active" : ""}`}
+          onClick={() => setActiveTab("params")}
+        >
+          Params
+          {paramCount > 0 && <span className="tab-badge">{paramCount}</span>}
+        </button>
+        <button
+          className={`tab-btn${activeTab === "headers" ? " active" : ""}`}
+          onClick={() => setActiveTab("headers")}
+        >
+          Headers
+          {headerCount > 0 && <span className="tab-badge">{headerCount}</span>}
+        </button>
+        <button
+          className={`tab-btn${activeTab === "body" ? " active" : ""}${!hasBody ? " tab-disabled" : ""}`}
+          onClick={() => hasBody && setActiveTab("body")}
+        >
+          Body
+        </button>
       </div>
 
-      {/* ── Body ── */}
-      {(method === "POST" || method === "PUT" || method === "PATCH") && (
-        <div className="re-section">
-          <label className="re-label">
-            Body <span className="re-hint">(raw JSON)</span>
-          </label>
+      {/* ── Tab panels ── */}
+      <div className="tab-panel">
+        {activeTab === "params" && (
+          <KvTable
+            rows={params}
+            onChange={handleParamsChange}
+            keyPlaceholder="Parameter name"
+            valuePlaceholder="Value"
+          />
+        )}
+
+        {activeTab === "headers" && (
+          <KvTable
+            rows={headers}
+            onChange={setHeaders}
+            keyPlaceholder="Header name"
+            valuePlaceholder="Value"
+          />
+        )}
+
+        {activeTab === "body" && hasBody && (
           <textarea
             className="re-textarea re-body"
-            rows={8}
+            rows={10}
             placeholder='{ "key": "value" }'
             value={body}
             onChange={(e) => setBody(e.target.value)}
           />
-        </div>
-      )}
+        )}
+
+        {activeTab === "body" && !hasBody && (
+          <div className="re-body-disabled">
+            Body is not available for {method} requests.
+          </div>
+        )}
+      </div>
 
       {/* ── Save row ── */}
       <div className="re-actions">
@@ -323,5 +350,94 @@ export const RequestEditor: React.FC<Props> = ({
         </button>
       </div>
     </div>
+  );
+};
+
+/* ─── Reusable Key-Value table (used by Params & Headers tabs) ──────────── */
+
+interface KvTableProps {
+  rows: KvRow[];
+  onChange: (rows: KvRow[]) => void;
+  keyPlaceholder: string;
+  valuePlaceholder: string;
+}
+
+const KvTable: React.FC<KvTableProps> = ({
+  rows,
+  onChange,
+  keyPlaceholder,
+  valuePlaceholder,
+}) => {
+  const updateRow = (i: number, patch: Partial<KvRow>) => {
+    const next = [...rows];
+    next[i] = { ...rows[i], ...patch };
+    // Auto-add empty row when typing into the last row
+    if (
+      i === rows.length - 1 &&
+      (patch.key || patch.value) &&
+      (next[i].key || next[i].value)
+    ) {
+      next.push({ key: "", value: "", enabled: true });
+    }
+    onChange(next);
+  };
+
+  const removeRow = (i: number) => {
+    const next = rows.filter((_, j) => j !== i);
+    if (next.length === 0) next.push({ key: "", value: "", enabled: true });
+    onChange(next);
+  };
+
+  return (
+    <table className="re-kv-table">
+      <thead>
+        <tr>
+          <th className="re-hdr-check"></th>
+          <th className="re-hdr-key">Key</th>
+          <th className="re-hdr-val">Value</th>
+          <th className="re-hdr-del"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={i} className={row.enabled ? "" : "re-hdr-disabled"}>
+            <td className="re-hdr-check">
+              <input
+                type="checkbox"
+                checked={row.enabled}
+                onChange={(e) => updateRow(i, { enabled: e.target.checked })}
+              />
+            </td>
+            <td className="re-hdr-key">
+              <input
+                type="text"
+                placeholder={keyPlaceholder}
+                value={row.key}
+                onChange={(e) => updateRow(i, { key: e.target.value })}
+              />
+            </td>
+            <td className="re-hdr-val">
+              <input
+                type="text"
+                placeholder={valuePlaceholder}
+                value={row.value}
+                onChange={(e) => updateRow(i, { value: e.target.value })}
+              />
+            </td>
+            <td className="re-hdr-del">
+              {rows.length > 1 && (
+                <button
+                  className="re-hdr-remove"
+                  onClick={() => removeRow(i)}
+                  title="Remove row"
+                >
+                  ×
+                </button>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 };

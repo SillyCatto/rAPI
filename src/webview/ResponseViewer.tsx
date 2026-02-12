@@ -1,6 +1,6 @@
 /**
- * ResponseViewer.tsx — Right pane: status, timing, response headers, body (pretty / raw).
- * Includes a lightweight JSON syntax highlighter (no external deps).
+ * ResponseViewer.tsx — Right pane: status bar, tabbed Body/Headers/Cookies.
+ * Includes lightweight JSON & HTML syntax highlighters (no external deps).
  */
 
 import React, { useMemo, useState } from "react";
@@ -12,9 +12,11 @@ interface Props {
   loading: boolean;
 }
 
+type RespTab = "body" | "headers" | "cookies";
+
 export const ResponseViewer: React.FC<Props> = ({ result, error, loading }) => {
   const [viewMode, setViewMode] = useState<"pretty" | "raw">("pretty");
-  const [showHeaders, setShowHeaders] = useState(false);
+  const [activeTab, setActiveTab] = useState<RespTab>("body");
 
   if (loading) {
     return (
@@ -49,6 +51,9 @@ export const ResponseViewer: React.FC<Props> = ({ result, error, loading }) => {
         ? "rv-status-err"
         : "rv-status-other";
 
+  const headerCount = Object.keys(result.headers).length;
+  const cookies = parseCookies(result.headers);
+
   return (
     <div className="rv-container">
       {/* ── Status bar ── */}
@@ -60,17 +65,68 @@ export const ResponseViewer: React.FC<Props> = ({ result, error, loading }) => {
         <span className="rv-size">{formatBytes(result.bodyText.length)}</span>
       </div>
 
-      {/* ── Headers (collapsible) ── */}
-      <div className="rv-section">
+      {/* ── Tabs: Body | Headers | Cookies ── */}
+      <div className="tab-bar">
         <button
-          className="rv-toggle"
-          onClick={() => setShowHeaders(!showHeaders)}
+          className={`tab-btn${activeTab === "body" ? " active" : ""}`}
+          onClick={() => setActiveTab("body")}
         >
-          {showHeaders ? "▾" : "▸"} Headers (
-          {Object.keys(result.headers).length})
+          Body
         </button>
-        {showHeaders && (
+        <button
+          className={`tab-btn${activeTab === "headers" ? " active" : ""}`}
+          onClick={() => setActiveTab("headers")}
+        >
+          Headers
+          {headerCount > 0 && <span className="tab-badge">{headerCount}</span>}
+        </button>
+        <button
+          className={`tab-btn${activeTab === "cookies" ? " active" : ""}`}
+          onClick={() => setActiveTab("cookies")}
+        >
+          Cookies
+          {cookies.length > 0 && (
+            <span className="tab-badge">{cookies.length}</span>
+          )}
+        </button>
+      </div>
+
+      {/* ── Tab panels ── */}
+      <div className="tab-panel rv-tab-panel">
+        {activeTab === "body" && (
+          <>
+            <div className="rv-view-toggle">
+              <button
+                className={viewMode === "pretty" ? "active" : ""}
+                onClick={() => setViewMode("pretty")}
+              >
+                Pretty
+              </button>
+              <button
+                className={viewMode === "raw" ? "active" : ""}
+                onClick={() => setViewMode("raw")}
+              >
+                Raw
+              </button>
+            </div>
+            <pre className="rv-body">
+              {viewMode === "pretty" ? (
+                <PrettyBody result={result} />
+              ) : (
+                result.bodyText
+              )}
+            </pre>
+          </>
+        )}
+
+        {activeTab === "headers" && (
           <table className="rv-headers-table">
+            <thead>
+              <tr>
+                <th className="rv-hdr-key">Name</th>
+                <th className="rv-hdr-val">Value</th>
+              </tr>
+            </thead>
             <tbody>
               {Object.entries(result.headers).map(([k, v]) => (
                 <tr key={k}>
@@ -81,35 +137,92 @@ export const ResponseViewer: React.FC<Props> = ({ result, error, loading }) => {
             </tbody>
           </table>
         )}
-      </div>
 
-      {/* ── Body view toggle ── */}
-      <div className="rv-view-toggle">
-        <button
-          className={viewMode === "pretty" ? "active" : ""}
-          onClick={() => setViewMode("pretty")}
-        >
-          Pretty
-        </button>
-        <button
-          className={viewMode === "raw" ? "active" : ""}
-          onClick={() => setViewMode("raw")}
-        >
-          Raw
-        </button>
+        {activeTab === "cookies" &&
+          (cookies.length > 0 ? (
+            <table className="rv-cookies-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Value</th>
+                  <th>Domain</th>
+                  <th>Path</th>
+                  <th>Expires</th>
+                  <th>HttpOnly</th>
+                  <th>Secure</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cookies.map((c, i) => (
+                  <tr key={i}>
+                    <td className="rv-cookie-name">{c.name}</td>
+                    <td className="rv-cookie-val">{c.value}</td>
+                    <td>{c.domain}</td>
+                    <td>{c.path}</td>
+                    <td>{c.expires}</td>
+                    <td>{c.httpOnly ? "✓" : ""}</td>
+                    <td>{c.secure ? "✓" : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="rv-empty">No cookies in response.</div>
+          ))}
       </div>
-
-      {/* ── Body ── */}
-      <pre className="rv-body">
-        {viewMode === "pretty" ? (
-          <PrettyBody result={result} />
-        ) : (
-          result.bodyText
-        )}
-      </pre>
     </div>
   );
 };
+
+/* ─── Cookie parser ───────────────────────────────────────────────────────── */
+
+interface ParsedCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires: string;
+  httpOnly: boolean;
+  secure: boolean;
+}
+
+function parseCookies(headers: Record<string, string>): ParsedCookie[] {
+  // Response headers may have set-cookie (Node lowercases them)
+  const raw = headers["set-cookie"] ?? "";
+  if (!raw) return [];
+
+  // set-cookie may be newline-separated when multiple
+  const lines = raw.split(/\n/);
+  return lines.map((line) => {
+    const parts = line.split(";").map((s) => s.trim());
+    const [nameVal, ...attrs] = parts;
+    const eqIdx = nameVal.indexOf("=");
+    const name = eqIdx > -1 ? nameVal.slice(0, eqIdx) : nameVal;
+    const value = eqIdx > -1 ? nameVal.slice(eqIdx + 1) : "";
+
+    const cookie: ParsedCookie = {
+      name,
+      value,
+      domain: "",
+      path: "",
+      expires: "",
+      httpOnly: false,
+      secure: false,
+    };
+
+    for (const attr of attrs) {
+      const lower = attr.toLowerCase();
+      if (lower === "httponly") cookie.httpOnly = true;
+      else if (lower === "secure") cookie.secure = true;
+      else if (lower.startsWith("domain=")) cookie.domain = attr.slice(7);
+      else if (lower.startsWith("path=")) cookie.path = attr.slice(5);
+      else if (lower.startsWith("expires=")) cookie.expires = attr.slice(8);
+      else if (lower.startsWith("max-age="))
+        cookie.expires = `max-age ${attr.slice(8)}s`;
+    }
+    return cookie;
+  });
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
